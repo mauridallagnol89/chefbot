@@ -1,41 +1,46 @@
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 import google.generativeai as genai
-import os
 from prompt import chefbot_prompt
-
-from dotenv import load_dotenv
-load_dotenv()
-
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-model = genai.GenerativeModel('gemini-pro')
+import os
 
 app = Flask(__name__)
+
+# Configurar chave da API Gemini
+genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
+
+# Armazenar histórico por usuário
 conversations = {}
 
-@app.route('/whatsapp', methods=['POST'])
+@app.route("/whatsapp", methods=["POST"])
 def whatsapp():
-    incoming_msg = request.form.get('Body', '').strip()
-    user_id = request.form.get('From', 'anon')
+    incoming_msg = request.form.get('Body')
+    user_number = request.form.get('From')
 
-    if user_id not in conversations:
-        conversations[user_id] = []
+    # Se não houver histórico, criar um novo
+    if user_number not in conversations:
+        conversations[user_number] = [chefbot_prompt]
 
-    conversations[user_id].append({"role": "user", "parts": [incoming_msg]})
+    # Adicionar a nova mensagem ao histórico
+    conversations[user_number].append(f"Usuário: {incoming_msg}")
 
-    try:
-        chat = model.start_chat(history=conversations[user_id])
-        response = chat.send_message(chefbot_prompt + "\nUsuário: " + incoming_msg)
-        reply = response.text
+    # Criar modelo
+    model = genai.GenerativeModel("gemini-pro")
 
-        conversations[user_id].append({"role": "model", "parts": [reply]})
-    except Exception as e:
-        reply = f"Opa! Tive um probleminha na cozinha: {str(e)}"
+    # Gerar resposta com o histórico
+    chat = model.start_chat(history=[])
+    for msg in conversations[user_number]:
+        chat.send_message(msg)
 
+    response = chat.last.text
+
+    # Adicionar resposta ao histórico
+    conversations[user_number].append(f"ChefBot: {response}")
+
+    # Responder pelo Twilio
     twilio_response = MessagingResponse()
-    twilio_response.message(reply)
+    twilio_response.message(response)
     return str(twilio_response)
 
-@app.route('/')
-def home():
-    return "ChefBot está no fogo! 🍳"
+if __name__ == "__main__":
+    app.run(debug=True)
