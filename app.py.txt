@@ -1,0 +1,41 @@
+from flask import Flask, request
+from twilio.twiml.messaging_response import MessagingResponse
+import google.generativeai as genai
+import os
+from prompt import chefbot_prompt
+
+from dotenv import load_dotenv
+load_dotenv()
+
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+model = genai.GenerativeModel('gemini-pro')
+
+app = Flask(__name__)
+conversations = {}
+
+@app.route('/whatsapp', methods=['POST'])
+def whatsapp():
+    incoming_msg = request.form.get('Body', '').strip()
+    user_id = request.form.get('From', 'anon')
+
+    if user_id not in conversations:
+        conversations[user_id] = []
+
+    conversations[user_id].append({"role": "user", "parts": [incoming_msg]})
+
+    try:
+        chat = model.start_chat(history=conversations[user_id])
+        response = chat.send_message(chefbot_prompt + "\nUsuário: " + incoming_msg)
+        reply = response.text
+
+        conversations[user_id].append({"role": "model", "parts": [reply]})
+    except Exception as e:
+        reply = f"Opa! Tive um probleminha na cozinha: {str(e)}"
+
+    twilio_response = MessagingResponse()
+    twilio_response.message(reply)
+    return str(twilio_response)
+
+@app.route('/')
+def home():
+    return "ChefBot está no fogo! 🍳"
